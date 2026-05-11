@@ -1,0 +1,128 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,400&family=DM+Mono:wght@400;500&display=swap');
+
+@layer base {
+  :root {
+    --background: 214 32% 97%;
+    --foreground: 215 28% 12%;
+    --card: 0 0% 100%;
+    --card-foreground: 215 28% 12%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 215 28% 12%;
+    --primary: 210 71% 38%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 214 32% 95%;
+    --secondary-foreground: 215 28% 20%;
+    --muted: 214 20% 93%;
+    --muted-foreground: 215 16% 47%;
+    --accent: 210 71% 38%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 72% 56%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 214 20% 88%;
+    --input: 214 20% 88%;
+    --ring: 210 71% 38%;
+    --radius: 0.625rem;
+    --sidebar-bg: 0 0% 100%;
+    --nav-height: 56px;
+    --sidebar-width: 220px;
+  }
+
+  .dark {
+    --background: 215 28% 9%;
+    --foreground: 214 20% 93%;
+    --card: 215 28% 12%;
+    --card-foreground: 214 20% 93%;
+    --popover: 215 28% 12%;
+    --popover-foreground: 214 20% 93%;
+    --primary: 210 71% 52%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 215 28% 16%;
+    --secondary-foreground: 214 20% 80%;
+    --muted: 215 28% 16%;
+    --muted-foreground: 215 16% 55%;
+    --accent: 210 71% 52%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 72% 56%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 215 28% 20%;
+    --input: 215 28% 20%;
+    --ring: 210 71% 52%;
+    --sidebar-bg: 215 28% 10%;
+  }
+
+  * {
+    @apply border-border;
+    box-sizing: border-box;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: var(--font-dm-sans), 'DM Sans', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}
+
+@layer components {
+  .clinical-card {
+    @apply bg-card border border-border rounded-xl shadow-sm;
+  }
+
+  .risk-badge-low {
+    @apply inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-green-50 text-green-700 border border-green-200;
+  }
+  .risk-badge-moderate {
+    @apply inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-200;
+  }
+  .risk-badge-high {
+    @apply inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-red-50 text-red-700 border border-red-200;
+  }
+  .risk-badge-critical {
+    @apply inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-purple-50 text-purple-700 border border-purple-200;
+  }
+
+  .stat-card {
+    @apply clinical-card p-5 relative overflow-hidden;
+  }
+
+  .nav-item {
+    @apply flex items-center gap-2.5 px-3 py-2 mx-2 rounded-lg cursor-pointer text-muted-foreground text-sm transition-all duration-150 hover:bg-secondary hover:text-foreground;
+  }
+
+  .nav-item-active {
+    @apply bg-primary/10 text-primary font-medium;
+  }
+
+  .form-section {
+    @apply clinical-card p-5 mb-4;
+  }
+
+  .ai-insight {
+    @apply bg-blue-50 border border-blue-100 rounded-lg p-3.5 mb-2.5;
+  }
+
+  .prediction-gradient {
+    background: linear-gradient(135deg, #0D1B2A 0%, #1B3A5C 100%);
+  }
+}
+
+@layer utilities {
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--border)) transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 4px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background-color: hsl(var(--border));
+    border-radius: 2px;
+  }
+}
