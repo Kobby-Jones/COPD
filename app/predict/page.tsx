@@ -183,7 +183,7 @@ export default function PredictPage() {
           <Clock className="w-7 h-7 text-clinical-amber" />
         </div>
         <div>
-          <h2 className="text-lg font-bold text-foreground">Respiratory-Sound Model Not Trained Yet</h2>
+          <h2 className="text-lg font-bold text-foreground">Respiratory-Sound Model Unavailable</h2>
           <p className="text-sm text-muted-foreground mt-2 max-w-md mx-auto">{modelNotReady.message}</p>
           {modelNotReady.detail && (
             <p className="text-xs text-muted-foreground/80 mt-3 max-w-md mx-auto leading-relaxed">{modelNotReady.detail}</p>

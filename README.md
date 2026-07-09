@@ -57,13 +57,14 @@ The `/predict` page now has two detection modes:
    clinical form as `audioRecordingId` with `mode: "audio"` to
    `POST /predictions`.
 
-Because the ICBHI respiratory-sound model hasn't been trained yet, the
-backend responds `503 MODEL_NOT_READY` for audio-mode predictions. The
-frontend handles this gracefully — `lib/apiClient.ts`'s `ApiError` exposes
-`isModelNotReady`, and the predict page shows a dedicated "model not trained
-yet" screen instead of a broken result. Once the model is trained and
-`AUDIO_MODEL_SERVICE_URL` is set on the backend, this mode will start
-returning real predictions with no frontend changes required.
+The ICBHI respiratory-sound model is now trained and served by `ml-service/`
+(see the root README) — with `AUDIO_MODEL_SERVICE_URL` set on the backend,
+audio-mode predictions return a real risk score. If that service isn't
+running or the URL isn't set, the backend responds `503 MODEL_NOT_READY`
+instead, and the frontend still handles this gracefully —
+`lib/apiClient.ts`'s `ApiError` exposes `isModelNotReady`, and the predict
+page shows a dedicated "model not available" screen instead of a broken
+result, so the feature degrades safely either way.
 
 ## Features
 
@@ -104,11 +105,11 @@ returning real predictions with no frontend changes required.
 └── types/                   # TypeScript interfaces
 ```
 
-## Next Step: Training the ICBHI Model
+## ICBHI Model Status
 
-The backend is fully scaffolded for the audio detection mode (upload,
-storage, DB records, response contract) but does not train or host the model
-itself. Once a respiratory-sound classifier is trained on the ICBHI
-Respiratory Sound Database and served behind a small inference microservice,
-point the backend's `AUDIO_MODEL_SERVICE_URL` at it — no frontend changes are
-needed.
+The respiratory-sound model is now trained and wired up (see
+`../ml-service/README.md`) — audio-mode predictions return real risk scores,
+not a "not trained yet" placeholder, as long as the backend's
+`AUDIO_MODEL_SERVICE_URL` points at a running `ml-service` instance. If that
+service isn't running, the frontend still degrades gracefully to the same
+"model not available" screen described above — nothing breaks either way.
