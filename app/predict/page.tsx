@@ -8,12 +8,15 @@ import {
   User, Wind, Activity, Heart, Brain, CheckCircle,
   AlertTriangle, AlertOctagon, ShieldAlert, RefreshCw,
   Stethoscope, Ban, Calendar, BarChart2, Printer, Download,
+  ClipboardList, Mic, Clock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn, getRiskColor, getRiskClassificationLabel, classifyRisk } from "@/lib/utils";
-import { predictionService } from "@/services/api";
+import { predictionService, type AudioRecording } from "@/services/api";
+import { ApiError } from "@/lib/apiClient";
+import { AudioRecorder } from "@/components/predict/AudioRecorder";
 import type { PredictionResult, Sex, DyspnoeaGrade, SmokingStatus } from "@/types";
 
 // ─── Schema ────────────────────────────────────────────────────────────────
@@ -64,17 +67,30 @@ function SectionHeader({ icon: Icon, title, subtitle }: { icon: any; title: stri
   );
 }
 
-const LOADING_STEPS = [
-  { text: "Analyzing clinical data...", sub: "Processing patient parameters" },
-  { text: "Running ensemble model...", sub: "GradientBoost v2.4.1 inference" },
-  { text: "Computing SHAP values...", sub: "Calculating feature contributions" },
-  { text: "Generating recommendations...", sub: "Applying clinical decision rules" },
-];
+const LOADING_STEPS = {
+  clinical: [
+    { text: "Analyzing clinical data...", sub: "Processing patient parameters" },
+    { text: "Running ensemble model...", sub: "GradientBoost v2.4.1 inference" },
+    { text: "Computing SHAP values...", sub: "Calculating feature contributions" },
+    { text: "Generating recommendations...", sub: "Applying clinical decision rules" },
+  ],
+  audio: [
+    { text: "Uploading breathing sound...", sub: "Preparing audio for inference" },
+    { text: "Extracting acoustic features...", sub: "librosa/torchaudio feature pipeline" },
+    { text: "Running ICBHI sound classifier...", sub: "Detecting crackles / wheezes / normal" },
+    { text: "Compiling risk assessment...", sub: "Merging with clinical context" },
+  ],
+};
 
 export default function PredictPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [loadingStep, setLoadingStep] = useState(0);
   const [result, setResult] = useState<PredictionResult | null>(null);
+  const [mode, setMode] = useState<"clinical" | "audio">("clinical");
+  const [audioRecording, setAudioRecording] = useState<AudioRecording | null>(null);
+  const [audioRequiredError, setAudioRequiredError] = useState<string | null>(null);
+  const [modelNotReady, setModelNotReady] = useState<{ message: string; detail?: string } | null>(null);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   const { register, handleSubmit, control, watch, formState: { errors } } = useForm<FormData>({
     resolver: zodResolver(schema),
@@ -89,19 +105,40 @@ export default function PredictPage() {
   });
 
   async function onSubmit(data: FormData) {
+    setSubmitError(null);
+    setModelNotReady(null);
+
+    if (mode === "audio" && !audioRecording) {
+      setAudioRequiredError("Please record or upload a breathing sound sample before generating a prediction.");
+      return;
+    }
+    setAudioRequiredError(null);
+
     setIsLoading(true);
     setLoadingStep(0);
 
     const interval = setInterval(() => {
       setLoadingStep((s) => {
-        if (s >= LOADING_STEPS.length - 1) { clearInterval(interval); return s; }
+        if (s >= LOADING_STEPS[mode].length - 1) { clearInterval(interval); return s; }
         return s + 1;
       });
     }, 700);
 
     try {
-      const res = await predictionService.predict(data);
+      const res = await predictionService.predict({
+        ...data,
+        mode,
+        audioRecordingId: mode === "audio" ? audioRecording?.id : undefined,
+      });
       setResult(res);
+    } catch (err) {
+      if (err instanceof ApiError && err.isModelNotReady) {
+        setModelNotReady({ message: err.message, detail: err.detail });
+      } else if (err instanceof ApiError) {
+        setSubmitError(err.message);
+      } else {
+        setSubmitError("Something went wrong while generating the prediction. Please try again.");
+      }
     } finally {
       clearInterval(interval);
       setIsLoading(false);
@@ -126,14 +163,39 @@ export default function PredictPage() {
         </div>
         <AnimatePresence mode="wait">
           <motion.div key={loadingStep} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} className="text-center">
-            <p className="text-base font-semibold text-foreground">{LOADING_STEPS[loadingStep]?.text}</p>
-            <p className="text-sm text-muted-foreground mt-1">{LOADING_STEPS[loadingStep]?.sub}</p>
+            <p className="text-base font-semibold text-foreground">{LOADING_STEPS[mode][loadingStep]?.text}</p>
+            <p className="text-sm text-muted-foreground mt-1">{LOADING_STEPS[mode][loadingStep]?.sub}</p>
           </motion.div>
         </AnimatePresence>
         <div className="flex gap-2">
-          {LOADING_STEPS.map((_, i) => (
+          {LOADING_STEPS[mode].map((_, i) => (
             <div key={i} className={cn("w-2 h-2 rounded-full transition-all", i <= loadingStep ? "bg-clinical-blue" : "bg-muted")} />
           ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (modelNotReady) {
+    return (
+      <div className="max-w-2xl mx-auto flex flex-col items-center justify-center min-h-[60vh] gap-5 text-center">
+        <div className="w-16 h-16 rounded-full bg-amber-50 border border-amber-100 flex items-center justify-center">
+          <Clock className="w-7 h-7 text-clinical-amber" />
+        </div>
+        <div>
+          <h2 className="text-lg font-bold text-foreground">Respiratory-Sound Model Not Trained Yet</h2>
+          <p className="text-sm text-muted-foreground mt-2 max-w-md mx-auto">{modelNotReady.message}</p>
+          {modelNotReady.detail && (
+            <p className="text-xs text-muted-foreground/80 mt-3 max-w-md mx-auto leading-relaxed">{modelNotReady.detail}</p>
+          )}
+        </div>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={() => { setModelNotReady(null); setMode("clinical"); }}>
+            <ClipboardList className="w-3.5 h-3.5 mr-1.5" /> Use Clinical Questionnaire Instead
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => setModelNotReady(null)}>
+            <RefreshCw className="w-3.5 h-3.5 mr-1.5" /> Back to Form
+          </Button>
         </div>
       </div>
     );
@@ -148,7 +210,7 @@ export default function PredictPage() {
             <p className="text-sm text-muted-foreground mt-1">{result.patientName} · Generated {new Date(result.generatedAt).toLocaleString()}</p>
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={() => setResult(null)}><RefreshCw className="w-3.5 h-3.5 mr-1.5" /> New Assessment</Button>
+            <Button variant="outline" size="sm" onClick={() => { setResult(null); setAudioRecording(null); setMode("clinical"); }}><RefreshCw className="w-3.5 h-3.5 mr-1.5" /> New Assessment</Button>
             <Button variant="outline" size="sm"><Download className="w-3.5 h-3.5 mr-1.5" /> Export PDF</Button>
             <Button variant="outline" size="sm"><Printer className="w-3.5 h-3.5 mr-1.5" /> Print</Button>
           </div>
@@ -250,6 +312,65 @@ export default function PredictPage() {
       </div>
 
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+
+        {/* Detection Mode */}
+        <div className="form-section">
+          <SectionHeader icon={Brain} title="Detection Mode" subtitle="Choose how this assessment should be generated" />
+          <div className="flex gap-3">
+            <button
+              type="button"
+              onClick={() => setMode("clinical")}
+              className={cn(
+                "flex-1 flex items-center gap-3 rounded-xl border-2 p-4 text-left transition-all",
+                mode === "clinical" ? "border-clinical-blue bg-clinical-blue-light" : "border-border bg-white hover:bg-secondary"
+              )}
+            >
+              <div className={cn("w-9 h-9 rounded-lg flex items-center justify-center shrink-0", mode === "clinical" ? "bg-clinical-blue text-white" : "bg-secondary text-muted-foreground")}>
+                <ClipboardList className="w-4 h-4" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-foreground">Clinical Questionnaire</p>
+                <p className="text-xs text-muted-foreground">GradientBoost Ensemble v2.4.1 — active</p>
+              </div>
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode("audio")}
+              className={cn(
+                "flex-1 flex items-center gap-3 rounded-xl border-2 p-4 text-left transition-all",
+                mode === "audio" ? "border-clinical-blue bg-clinical-blue-light" : "border-border bg-white hover:bg-secondary"
+              )}
+            >
+              <div className={cn("w-9 h-9 rounded-lg flex items-center justify-center shrink-0", mode === "audio" ? "bg-clinical-blue text-white" : "bg-secondary text-muted-foreground")}>
+                <Mic className="w-4 h-4" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-foreground">Breathing Sound Recording</p>
+                <p className="text-xs text-muted-foreground">ICBHI respiratory-sound model</p>
+              </div>
+            </button>
+          </div>
+        </div>
+
+        {mode === "audio" && (
+          <div className="form-section">
+            <AudioRecorder
+              onUploaded={(rec) => {
+                setAudioRecording(rec);
+                if (rec) setAudioRequiredError(null);
+              }}
+            />
+            {audioRequiredError && (
+              <p className="text-xs text-red-500 mt-3">{audioRequiredError}</p>
+            )}
+          </div>
+        )}
+
+        {submitError && (
+          <div className="rounded-lg bg-red-50 border border-red-100 text-red-700 text-xs px-4 py-3">
+            {submitError}
+          </div>
+        )}
 
         {/* Section A */}
         <div className="form-section">
@@ -398,7 +519,7 @@ export default function PredictPage() {
           className="w-full h-14 rounded-xl text-white text-base font-bold flex items-center justify-center gap-3 transition-all hover:-translate-y-0.5 hover:shadow-lg hover:shadow-clinical-blue/25 active:translate-y-0"
           style={{ background: "linear-gradient(135deg, #1B6CA8 0%, #0EA5E9 100%)" }}>
           <Brain className="w-5 h-5" />
-          Generate COPD Risk Prediction
+          {mode === "audio" ? "Analyze Breathing Sound & Generate Prediction" : "Generate COPD Risk Prediction"}
         </button>
       </form>
     </div>

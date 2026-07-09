@@ -5,45 +5,67 @@ import type {
   DashboardStats,
   ModelMetrics,
   Report,
+  User,
+  TrendDataPoint,
+  AgeDistribution,
+  SmokingImpact,
 } from "@/types";
-import {
-  MOCK_PATIENTS,
-  MOCK_DASHBOARD_STATS,
-  MOCK_MODEL_METRICS,
-  MOCK_REPORTS,
-  MOCK_TREND_DATA,
-  MOCK_PREDICTION_RESULT,
-  GLOBAL_FEATURE_IMPORTANCE,
-} from "@/data/mockData";
-import { classifyRisk, getRiskClassificationLabel } from "@/lib/utils";
-
-// ─── Simulate async delay ──────────────────────────────────────────────────
-const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
+import { api, apiUrl, ApiError } from "@/lib/apiClient";
+import { tokenStore } from "@/lib/tokenStore";
 
 // ─── Auth ──────────────────────────────────────────────────────────────────
 
+interface AuthResponse {
+  user: User;
+  accessToken: string;
+  refreshToken: string;
+}
+
 export const authService = {
-  async login(email: string, password: string) {
-    await delay(800);
-    if (!email || !password) throw new Error("Invalid credentials");
-    return {
-      id: "USR-001",
-      name: "Dr. Sarah Mitchell",
-      email,
-      role: "Pulmonologist",
-      department: "Respiratory Medicine",
-      licenseNumber: "MD-2019-04821",
-      initials: "SM",
-    };
+  async login(email: string, password: string): Promise<User> {
+    const res = await api.post<AuthResponse>("/auth/login", { email, password }, { auth: false });
+    tokenStore.setTokens(res.accessToken, res.refreshToken);
+    return res.user;
   },
-  async logout() {
-    await delay(200);
+
+  async register(input: {
+    name: string;
+    email: string;
+    password: string;
+    role?: string;
+    department?: string;
+    licenseNumber?: string;
+  }): Promise<User> {
+    const res = await api.post<AuthResponse>("/auth/register", input, { auth: false });
+    tokenStore.setTokens(res.accessToken, res.refreshToken);
+    return res.user;
+  },
+
+  async logout(): Promise<boolean> {
+    try {
+      await api.post("/auth/logout");
+    } catch {
+      // Best-effort — always clear local tokens regardless of network state.
+    } finally {
+      tokenStore.clear();
+    }
     return true;
   },
-  async forgotPassword(email: string) {
-    await delay(600);
-    if (!email) throw new Error("Email required");
-    return { message: "Reset link sent to " + email };
+
+  async forgotPassword(email: string): Promise<{ message: string; devToken?: string }> {
+    return api.post("/auth/forgot-password", { email }, { auth: false });
+  },
+
+  async resetPassword(email: string, token: string, newPassword: string): Promise<{ message: string }> {
+    return api.post("/auth/reset-password", { email, token, newPassword }, { auth: false });
+  },
+
+  async me(): Promise<User> {
+    return api.get<User>("/users/me");
+  },
+
+  isAuthenticated(): boolean {
+    return tokenStore.hasSession();
   },
 };
 
@@ -57,104 +79,102 @@ export const patientService = {
     page?: number;
     pageSize?: number;
   }): Promise<{ patients: Patient[]; total: number }> {
-    await delay(300);
-    let result = [...MOCK_PATIENTS];
-
-    if (filters?.search) {
-      const q = filters.search.toLowerCase();
-      result = result.filter(
-        (p) =>
-          p.name.toLowerCase().includes(q) ||
-          p.id.toLowerCase().includes(q) ||
-          p.department?.toLowerCase().includes(q)
-      );
-    }
-    if (filters?.riskLevel && filters.riskLevel !== "all") {
-      result = result.filter((p) => p.latestRiskLevel === filters.riskLevel);
-    }
-    if (filters?.sex && filters.sex !== "all") {
-      result = result.filter((p) => p.sex === filters.sex);
-    }
-
-    const page = filters?.page ?? 1;
-    const pageSize = filters?.pageSize ?? 10;
-    const start = (page - 1) * pageSize;
-    const total = result.length;
-    return { patients: result.slice(start, start + pageSize), total };
+    const params = new URLSearchParams();
+    if (filters?.search) params.set("search", filters.search);
+    if (filters?.riskLevel) params.set("riskLevel", filters.riskLevel);
+    if (filters?.sex) params.set("sex", filters.sex);
+    if (filters?.page) params.set("page", String(filters.page));
+    if (filters?.pageSize) params.set("pageSize", String(filters.pageSize));
+    const qs = params.toString();
+    return api.get(`/patients${qs ? `?${qs}` : ""}`);
   },
 
   async getById(id: string): Promise<Patient | null> {
-    await delay(200);
-    return MOCK_PATIENTS.find((p) => p.id === id) ?? null;
+    try {
+      return await api.get<Patient>(`/patients/${id}`);
+    } catch (err) {
+      if (err instanceof ApiError && err.statusCode === 404) return null;
+      throw err;
+    }
   },
 
   async create(data: Partial<Patient>): Promise<Patient> {
-    await delay(500);
-    const newPatient: Patient = {
-      ...data,
-      id: `PT-${Date.now()}`,
-      latestRiskLevel: "low",
-      latestRiskScore: 0,
-      lastAssessment: new Date().toISOString(),
-      createdAt: new Date().toISOString(),
-    } as Patient;
-    return newPatient;
+    return api.post("/patients", data);
   },
 
   async update(id: string, data: Partial<Patient>): Promise<Patient> {
-    await delay(400);
-    const existing = MOCK_PATIENTS.find((p) => p.id === id);
-    if (!existing) throw new Error("Patient not found");
-    return { ...existing, ...data };
+    return api.patch(`/patients/${id}`, data);
+  },
+
+  async remove(id: string): Promise<void> {
+    await api.delete(`/patients/${id}`);
+  },
+};
+
+// ─── Respiratory Audio (ICBHI breathing-sound recordings) ─────────────────
+
+export interface AudioRecording {
+  id: string;
+  patientId?: string;
+  originalFilename: string;
+  storedFilename: string;
+  mimeType: string;
+  sizeBytes: number;
+  durationSeconds?: number;
+  status: "uploaded" | "analyzing" | "completed" | "failed";
+  errorMessage?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const audioService = {
+  /** Upload a recorded/selected audio blob. Returns the created recording
+   * record (status "uploaded") — pass its id as `audioRecordingId` to
+   * predictionService.predict() with mode "audio" to run inference. */
+  async upload(file: Blob, filename: string, patientId?: string): Promise<AudioRecording> {
+    const form = new FormData();
+    form.append("file", file, filename);
+    const qs = patientId ? `?patientId=${encodeURIComponent(patientId)}` : "";
+    return api.post(`/respiratory-audio/upload${qs}`, form);
+  },
+
+  async getAll(patientId?: string): Promise<AudioRecording[]> {
+    const qs = patientId ? `?patientId=${encodeURIComponent(patientId)}` : "";
+    return api.get(`/respiratory-audio${qs}`);
+  },
+
+  async getById(id: string): Promise<AudioRecording> {
+    return api.get(`/respiratory-audio/${id}`);
+  },
+
+  /** Runs inference directly (normally unnecessary — predictionService.predict
+   * with mode "audio" triggers this server-side — but exposed for a
+   * "re-analyze" affordance). Throws ApiError with isModelNotReady === true
+   * until the ICBHI model is trained and AUDIO_MODEL_SERVICE_URL is set. */
+  async analyze(id: string): Promise<unknown> {
+    return api.post(`/respiratory-audio/${id}/analyze`);
+  },
+
+  async remove(id: string): Promise<void> {
+    await api.delete(`/respiratory-audio/${id}`);
   },
 };
 
 // ─── Predictions ───────────────────────────────────────────────────────────
 
 export const predictionService = {
-  async predict(input: PredictionInput): Promise<PredictionResult> {
-    // Multi-step loading simulation
-    await delay(2800);
-
-    // Simple heuristic scoring for demo
-    let score = 20;
-    if (input.smokingStatus === "current") score += 28;
-    else if (input.smokingStatus === "former") score += 12;
-    if (input.packYears > 30) score += 15;
-    else if (input.packYears > 15) score += 8;
-    if (input.age > 65) score += 12;
-    else if (input.age > 50) score += 6;
-    if (input.dyspnoeaGrade >= 2) score += 10;
-    else if (input.dyspnoeaGrade === 1) score += 4;
-    if (input.chronicCough) score += 5;
-    if (input.wheezingHistory) score += 5;
-    if (input.occupationalDust) score += 7;
-    if (input.biomassExposure) score += 5;
-    if (input.cardiovascularDisease) score += 4;
-    if (input.diabetesMellitus) score -= 2;
-    if (input.fev1Predicted && input.fev1Predicted < 70) score += 8;
-    if (input.bmi && input.bmi > 30) score -= 3;
-    if (input.bmi && input.bmi < 20) score += 4;
-
-    score = Math.max(5, Math.min(97, score));
-    const riskLevel = classifyRisk(score);
-
-    const result: PredictionResult = {
-      ...MOCK_PREDICTION_RESULT,
-      id: `PRED-${Date.now()}`,
-      patientName: input.name,
-      riskScore: score,
-      riskLevel,
-      confidence: 88 + Math.random() * 8,
-      generatedAt: new Date().toISOString(),
-    };
-
-    return result;
+  async predict(
+    input: PredictionInput & { mode?: "clinical" | "audio"; audioRecordingId?: string },
+  ): Promise<PredictionResult> {
+    return api.post("/predictions", input);
   },
 
   async getHistory(patientId: string): Promise<PredictionResult[]> {
-    await delay(300);
-    return [MOCK_PREDICTION_RESULT];
+    return api.get(`/predictions/history/${patientId}`);
+  },
+
+  async getById(id: string): Promise<PredictionResult> {
+    return api.get(`/predictions/${id}`);
   },
 };
 
@@ -162,18 +182,15 @@ export const predictionService = {
 
 export const dashboardService = {
   async getStats(): Promise<DashboardStats> {
-    await delay(200);
-    return MOCK_DASHBOARD_STATS;
+    return api.get("/dashboard/stats");
   },
 
-  async getTrends() {
-    await delay(200);
-    return MOCK_TREND_DATA;
+  async getTrends(): Promise<TrendDataPoint[]> {
+    return api.get("/dashboard/trends");
   },
 
-  async getRecentPredictions() {
-    await delay(200);
-    return MOCK_PATIENTS.slice(0, 5);
+  async getRecentPredictions(): Promise<Patient[]> {
+    return api.get("/dashboard/recent-predictions");
   },
 };
 
@@ -181,41 +198,23 @@ export const dashboardService = {
 
 export const analyticsService = {
   async getModelMetrics(): Promise<ModelMetrics> {
-    await delay(200);
-    return MOCK_MODEL_METRICS;
+    return api.get("/analytics/model-metrics");
   },
 
-  async getFeatureImportance() {
-    await delay(200);
-    return GLOBAL_FEATURE_IMPORTANCE;
+  async getFeatureImportance(): Promise<{ feature: string; importance: number; color: string }[]> {
+    return api.get("/analytics/feature-importance");
   },
 
-  async getAgeDistribution() {
-    await delay(200);
-    return [
-      { ageGroup: "40–49", percentage: 8 },
-      { ageGroup: "50–59", percentage: 24 },
-      { ageGroup: "60–69", percentage: 38 },
-      { ageGroup: "70–79", percentage: 22 },
-      { ageGroup: "80+", percentage: 8 },
-    ];
+  async getAgeDistribution(): Promise<AgeDistribution[]> {
+    return api.get("/analytics/age-distribution");
   },
 
-  async getSmokingImpact() {
-    await delay(200);
-    return [
-      { status: "Never", copdPrevalence: 4, avgRiskScore: 15 },
-      { status: "Former", copdPrevalence: 28, avgRiskScore: 48 },
-      { status: "Current", copdPrevalence: 68, avgRiskScore: 74 },
-    ];
+  async getSmokingImpact(): Promise<SmokingImpact[]> {
+    return api.get("/analytics/smoking-impact");
   },
 
-  async getGenderDistribution() {
-    await delay(200);
-    return [
-      { gender: "Male", percentage: 58 },
-      { gender: "Female", percentage: 42 },
-    ];
+  async getGenderDistribution(): Promise<{ gender: string; percentage: number }[]> {
+    return api.get("/analytics/gender-distribution");
   },
 };
 
@@ -223,23 +222,34 @@ export const analyticsService = {
 
 export const reportService = {
   async getAll(): Promise<Report[]> {
-    await delay(300);
-    return MOCK_REPORTS;
+    return api.get("/reports");
+  },
+
+  async getById(id: string): Promise<Report> {
+    return api.get(`/reports/${id}`);
   },
 
   async generate(patientId: string, type: Report["type"]): Promise<Report> {
-    await delay(600);
-    const patient = MOCK_PATIENTS.find((p) => p.id === patientId);
-    return {
-      id: `RPT-${Date.now()}`,
-      patientId,
-      patientName: patient?.name ?? "Unknown",
-      type,
-      title: `${patient?.name} — ${type === "individual" ? "COPD Assessment" : "Follow-up Report"}`,
-      riskLevel: patient?.latestRiskLevel,
-      generatedAt: new Date().toISOString(),
-      generatedBy: "Dr. Sarah Mitchell",
-      status: "ready",
-    };
+    return api.post("/reports", { patientId, type });
+  },
+
+  /** Downloads the generated PDF as a blob (fetch is required, not a plain
+   * <a href>, so the Authorization header can be attached) and triggers a
+   * browser save-as via a temporary object URL. */
+  async download(id: string): Promise<void> {
+    const token = tokenStore.getAccessToken();
+    const res = await fetch(apiUrl(`/reports/${id}/download`), {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
+    if (!res.ok) throw new Error("Failed to download report");
+    const blob = await res.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${id}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
   },
 };

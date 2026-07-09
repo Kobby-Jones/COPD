@@ -26,6 +26,19 @@ function ToggleSwitch({ checked, onChange }: { checked: boolean; onChange: (v: b
   );
 }
 
+function SecurityToggleRow({ label, desc, defaultOn = true }: { label: string; desc: string; defaultOn?: boolean }) {
+  const [checked, setChecked] = useState(defaultOn);
+  return (
+    <div className="flex items-center justify-between p-3 bg-secondary/50 rounded-lg">
+      <div>
+        <div className="text-sm font-medium text-foreground">{label}</div>
+        <div className="text-xs text-muted-foreground">{desc}</div>
+      </div>
+      <ToggleSwitch checked={checked} onChange={setChecked} />
+    </div>
+  );
+}
+
 function NotifRow({ label, desc, defaultOn = true }: { label: string; desc: string; defaultOn?: boolean }) {
   const [on, setOn] = useState(defaultOn);
   return (
@@ -188,18 +201,9 @@ export default function SettingsPage() {
                     { label: "Two-Factor Authentication", desc: "Require 2FA for every login — HIPAA recommended", on: true },
                     { label: "Session Alerts", desc: "Email notification on new device login", on: true },
                     { label: "Audit Log", desc: "Log all patient data access for compliance", on: true },
-                  ].map(({ label, desc, on }) => {
-                    const [checked, setChecked] = useState(on);
-                    return (
-                      <div key={label} className="flex items-center justify-between p-3 bg-secondary/50 rounded-lg">
-                        <div>
-                          <div className="text-sm font-medium text-foreground">{label}</div>
-                          <div className="text-xs text-muted-foreground">{desc}</div>
-                        </div>
-                        <ToggleSwitch checked={checked} onChange={setChecked} />
-                      </div>
-                    );
-                  })}
+                  ].map(({ label, desc, on }) => (
+                    <SecurityToggleRow key={label} label={label} desc={desc} defaultOn={on} />
+                  ))}
                 </div>
                 <Button onClick={handleSave} className="bg-clinical-blue hover:bg-[#1557A0] gap-2">
                   {saved ? <><Check className="w-4 h-4" /> Updated!</> : <><Shield className="w-4 h-4" /> Update Security</>}

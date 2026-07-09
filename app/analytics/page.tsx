@@ -6,10 +6,22 @@ import { StatCard } from "@/components/ui/StatCard";
 import { VBarChart, DonutChart, MetricBar, CHART_COLORS } from "@/components/charts";
 import { analyticsService } from "@/services/api";
 import type { ModelMetrics } from "@/types";
-import { MOCK_MODEL_METRICS } from "@/data/mockData";
+
+const EMPTY_METRICS: ModelMetrics = {
+  accuracy: 0,
+  precision: 0,
+  recall: 0,
+  f1Score: 0,
+  aucRoc: 0,
+  specificity: 0,
+  falseNegativeRate: 0,
+  validationCases: 0,
+  modelVersion: "—",
+  lastUpdated: "—",
+};
 
 export default function AnalyticsPage() {
-  const [metrics, setMetrics] = useState<ModelMetrics>(MOCK_MODEL_METRICS);
+  const [metrics, setMetrics] = useState<ModelMetrics>(EMPTY_METRICS);
   const [ageData, setAgeData] = useState<{ label: string; value: number }[]>([]);
   const [smokingData, setSmokingData] = useState<{ label: string; value: number }[]>([]);
   const [genderData, setGenderData] = useState<{ name: string; value: number }[]>([]);

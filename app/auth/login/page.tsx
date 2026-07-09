@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuthStore } from "@/context/authStore";
 import { authService } from "@/services/api";
+import { ApiError } from "@/lib/apiClient";
 import { cn } from "@/lib/utils";
 
 const schema = z.object({
@@ -30,7 +31,7 @@ export default function LoginPage() {
 
   const { register, handleSubmit, formState: { errors } } = useForm<FormData>({
     resolver: zodResolver(schema),
-    defaultValues: { email: "dr.mitchell@citymedical.org", password: "password123" },
+    defaultValues: { email: "sarah.mitchell@copdcare.example", password: "ChangeMe123!" },
   });
 
   async function onSubmit(data: FormData) {
@@ -40,8 +41,8 @@ export default function LoginPage() {
       const user = await authService.login(data.email, data.password);
       setUser(user);
       router.push("/dashboard");
-    } catch {
-      setError("Invalid credentials. Please try again.");
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Invalid credentials. Please try again.");
     } finally {
       setIsLoading(false);
     }
